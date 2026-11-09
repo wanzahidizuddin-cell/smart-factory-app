@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_factory_qc/domain/models/batch_status.dart';
+import 'package:smart_factory_qc/data/repositories/trace_repository.dart';
 import 'package:smart_factory_qc/features/deliveries/batch_released_screen.dart';
 import 'package:smart_factory_qc/features/deliveries/delivery_detail_screen.dart';
 import 'package:smart_factory_qc/features/inspections/production_inspection_screen.dart';
@@ -12,7 +13,11 @@ void main() {
   testWidgets(
       'releasing a quarantined delivery opens confirmation and updates state',
       (tester) async {
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [
+        inspectionSubmitterProvider.overrideWithValue((_) async {}),
+      ],
+    );
     addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -32,7 +37,7 @@ void main() {
     expect(find.text('Released by exception'), findsOneWidget);
     expect(
       container
-          .read(deliveryRepositoryProvider)
+          .read(deliveryStateProvider)
           .firstWhere((record) => record.batchNumber == 'B-1007')
           .status,
       BatchStatus.released,
@@ -40,7 +45,11 @@ void main() {
   });
 
   testWidgets('inspection form attaches a photo and signs off', (tester) async {
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [
+        inspectionSubmitterProvider.overrideWithValue((_) async {}),
+      ],
+    );
     addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -80,9 +89,61 @@ void main() {
     );
   });
 
-  testWidgets('trace screen lists newest events and filters by serial',
+  testWidgets('inspection submission errors are shown without recording',
       (tester) async {
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [
+        inspectionSubmitterProvider.overrideWithValue(
+          (_) => Future<void>.error(StateError('submission failed')),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ProductionInspectionScreen(),
+                    ),
+                  ),
+                  child: const Text('Open inspection'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open inspection'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Add photo from camera'));
+    await tester.tap(find.text('Add photo from camera'));
+    await tester.pump();
+    await tester.ensureVisible(find.text('Sign off'));
+    await tester.tap(find.text('Sign off'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Could not submit inspection: Bad state: submission failed'),
+      findsOneWidget,
+    );
+    expect(container.read(inspectionRecordsProvider), isEmpty);
+  });
+
+  testWidgets('trace screen searches and displays matching records',
+      (tester) async {
+    final container = ProviderContainer(
+      overrides: [
+        traceRepositoryProvider.overrideWithValue(_FakeTraceRepository()),
+      ],
+    );
     addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -91,13 +152,40 @@ void main() {
       ),
     );
 
-    expect(find.text('Released by authorised exception'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('Enter a search term to find records.'), findsOneWidget);
     await tester.enterText(
       find.byType(TextField),
-      'SN-20481',
+      'resin',
     );
     await tester.pumpAndSettle();
-    expect(find.text('Sample inspection signed'), findsOneWidget);
-    expect(find.text('Delivery received'), findsNothing);
+    expect(find.text('Industrial resin'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(Chip),
+        matching: find.text('Inventory'),
+      ),
+      findsOneWidget,
+    );
   });
+}
+
+class _FakeTraceRepository extends TraceRepository {
+  @override
+  Future<List<Map<String, dynamic>>> searchTraceHistory(String query) async {
+    if (query.toLowerCase() == 'resin') {
+      return [
+        {
+          'id': 'inventory-1',
+          'type': 'Inventory',
+          'name': 'Industrial resin',
+          'sku': 'RM-204',
+          'rack_location': 'Rack B-02',
+          'current_quantity': 12,
+          'unit': 'kg',
+        },
+      ];
+    }
+    return const [];
+  }
 }

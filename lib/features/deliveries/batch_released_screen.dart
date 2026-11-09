@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_factory_qc/core/theme/app_colors.dart';
 import 'package:smart_factory_qc/core/theme/app_theme.dart';
+import 'package:smart_factory_qc/core/widgets/responsive_content.dart';
 import 'package:smart_factory_qc/core/utils/format.dart';
 import 'package:smart_factory_qc/core/widgets/status_badge.dart';
 import 'package:smart_factory_qc/domain/models/batch_status.dart';
@@ -18,7 +19,7 @@ class BatchReleasedScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final delivery = ref
-        .watch(deliveryRepositoryProvider)
+        .watch(deliveryStateProvider)
         .where((record) => record.batchNumber == batchNumber)
         .firstOrNull;
 
@@ -42,17 +43,20 @@ class BatchReleasedScreen extends ConsumerWidget {
           ],
         ),
       ),
-      body: delivery == null
-          ? const Center(child: Text('Delivery record not found.'))
-          : _ConfirmationContent(
-              delivery: delivery,
-              onViewTrace: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => TraceSearchScreen(initialQuery: batchNumber),
+      body: ResponsiveContent(
+        maxWidth: 960,
+        child: delivery == null
+            ? const Center(child: Text('Delivery record not found.'))
+            : _ConfirmationContent(
+                delivery: delivery,
+                onViewTrace: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => TraceSearchScreen(initialQuery: batchNumber),
+                  ),
                 ),
+                onBackHome: () => returnToTab(context, ref, AppTab.home),
               ),
-              onBackHome: () => returnToTab(context, ref, AppTab.home),
-            ),
+      ),
       bottomNavigationBar: AppBottomNavBar(
         selectedIndex: AppTab.deliveries.index,
         onTap: (index) => returnToTab(context, ref, AppTab.values[index]),

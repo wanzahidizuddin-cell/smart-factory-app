@@ -4,12 +4,11 @@ import 'package:smart_factory_qc/app/sync_status.dart';
 import 'package:smart_factory_qc/core/theme/app_colors.dart';
 import 'package:smart_factory_qc/core/theme/app_theme.dart';
 import 'package:smart_factory_qc/core/utils/format.dart';
+import 'package:smart_factory_qc/core/widgets/responsive_content.dart';
 import 'package:smart_factory_qc/core/widgets/section_label.dart';
 import 'package:smart_factory_qc/core/widgets/status_badge.dart';
 import 'package:smart_factory_qc/data/dummy_data.dart';
 import 'package:smart_factory_qc/domain/models/activity_entry.dart';
-import 'package:smart_factory_qc/domain/models/batch_status.dart';
-import 'package:smart_factory_qc/domain/stock_calculator.dart';
 import 'package:smart_factory_qc/features/inspections/production_inspection_screen.dart';
 import 'package:smart_factory_qc/features/shared/providers/app_state.dart';
 import 'package:smart_factory_qc/core/widgets/offline_banner.dart';
@@ -19,17 +18,11 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final deliveries = ref.watch(deliveryRepositoryProvider);
-    final toReview =
-        deliveries.where((delivery) => delivery.needsReview).length;
-    final quarantined = deliveries
-        .where((delivery) => delivery.status == BatchStatus.quarantined)
-        .length;
-    final lowStock = DummyData.inventoryItems
-        .where((item) => isLowStock(item, DummyData.stockLevels))
-        .length;
-    final activity = ref.watch(activityProvider);
+    final stats = ref.watch(dashboardStatsProvider);
+    final activity = ref.watch(recentActivityProvider);
+    final localActivity = ref.watch(activityProvider);
     final sync = ref.watch(syncStatusProvider);
+    final lastSync = ref.watch(lastSyncProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -53,104 +46,164 @@ class HomeScreen extends ConsumerWidget {
           ],
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.s16),
-        children: [
-          if (sync.isOffline || sync.isSyncing) ...[
-            OfflineBanner(
-              pendingRecords: sync.pendingRecords,
-              isSyncing: sync.isSyncing,
-              onTap: () => ref.read(syncStatusProvider.notifier).sync(),
+      body: ResponsiveContent(
+        maxWidth: 1120,
+        child: ListView(
+          padding: const EdgeInsets.all(AppSpacing.s16),
+          children: [
+            if (sync.isOffline || sync.isSyncing) ...[
+              OfflineBanner(
+                pendingRecords: sync.pendingRecords,
+                isSyncing: sync.isSyncing,
+                onTap: () => ref.read(syncStatusProvider.notifier).sync(),
+              ),
+              const SizedBox(height: AppSpacing.s12),
+            ],
+            Text('Good morning, Asha', style: AppTextStyles.title),
+            const SizedBox(height: AppSpacing.s4),
+            Text(
+              'Sun, 18 Oct 2026 • Shift A • 06:00–14:00',
+              style: AppTextStyles.caption.copyWith(fontSize: 12),
             ),
             const SizedBox(height: AppSpacing.s12),
+            stats.when(
+              data: (dashboardStats) => IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _SummaryTile(
+                        label: 'Deliveries to review',
+                        value: dashboardStats.pendingDeliveries,
+                        color: AppColors.slate900,
+                        onTap: () {
+                          ref
+                              .read(deliveryFilterProvider.notifier)
+                              .showNeedsReview();
+                          ref
+                              .read(activeTabProvider.notifier)
+                              .select(AppTab.deliveries);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.s8),
+                    Expanded(
+                      child: _SummaryTile(
+                        label: 'Quarantined batches',
+                        value: dashboardStats.quarantinedDeliveries,
+                        color: AppColors.quarantinedText,
+                        onTap: () {
+                          ref
+                              .read(deliveryFilterProvider.notifier)
+                              .showQuarantined();
+                          ref
+                              .read(activeTabProvider.notifier)
+                              .select(AppTab.deliveries);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.s8),
+                    Expanded(
+                      child: _SummaryTile(
+                        label: 'Low-stock items',
+                        value: dashboardStats.lowStockItems,
+                        color: AppColors.slate900,
+                        onTap: () {
+                          ref
+                              .read(inventoryFilterProvider.notifier)
+                              .showLowStock();
+                          ref
+                              .read(activeTabProvider.notifier)
+                              .select(AppTab.inventory);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: AppSpacing.s24),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (error, stackTrace) => Card(
+                child: ListTile(
+                  title: const Text('Unable to load dashboard stats.'),
+                  trailing: IconButton(
+                    tooltip: 'Retry',
+                    onPressed: () =>
+                        ref.read(dashboardStatsProvider.notifier).refresh(),
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.s16),
+            const SectionLabel('Quick actions'),
+            const SizedBox(height: AppSpacing.s8),
+            SizedBox(
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: () => _showNewInspection(context),
+                icon: const Icon(Icons.assignment_add, size: 20),
+                label: const Text('New inspection'),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.s16),
+            const SectionLabel('Recent activity'),
+            const SizedBox(height: AppSpacing.s8),
+            activity.when(
+              data: (recentActivity) {
+                final localTitles =
+                    localActivity.map((entry) => entry.title).toSet();
+                final entries = [
+                  ...localActivity,
+                  ...recentActivity
+                      .where((entry) => !localTitles.contains(entry.title)),
+                ].take(5).toList(growable: false);
+                if (entries.isEmpty) {
+                  return const Text(
+                    'No recent inspections.',
+                    style: AppTextStyles.caption,
+                  );
+                }
+                return Column(
+                  children: [
+                    for (var index = 0; index < entries.length; index++) ...[
+                      if (index > 0) const SizedBox(height: AppSpacing.s8),
+                      _ActivityCard(
+                        entry: entries[index],
+                        onTap: () =>
+                            _showActivityDetails(context, entries[index]),
+                      ),
+                    ],
+                  ],
+                );
+              },
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: AppSpacing.s16),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (error, stackTrace) => Card(
+                child: ListTile(
+                  title: const Text('Unable to load recent activity.'),
+                  trailing: IconButton(
+                    tooltip: 'Retry',
+                    onPressed: () => ref.invalidate(recentActivityProvider),
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.s12),
+            Text(
+              lastSync == null
+                  ? 'Not synced yet'
+                  : 'Last synced ${TimeOfDay.fromDateTime(lastSync.toLocal()).format(context)}',
+              style: AppTextStyles.caption.copyWith(fontSize: 11),
+            ),
+            const SizedBox(height: AppSpacing.s8),
           ],
-          Text('Good morning, Asha', style: AppTextStyles.title),
-          const SizedBox(height: AppSpacing.s4),
-          Text(
-            'Sun, 18 Oct 2026 • Shift A • 06:00–14:00',
-            style: AppTextStyles.caption.copyWith(fontSize: 12),
-          ),
-          const SizedBox(height: AppSpacing.s12),
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: _SummaryTile(
-                    label: 'Deliveries to review',
-                    value: toReview,
-                    color: AppColors.slate900,
-                    onTap: () {
-                      ref
-                          .read(deliveryFilterProvider.notifier)
-                          .showNeedsReview();
-                      ref
-                          .read(activeTabProvider.notifier)
-                          .select(AppTab.deliveries);
-                    },
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.s8),
-                Expanded(
-                  child: _SummaryTile(
-                    label: 'Quarantined batches',
-                    value: quarantined,
-                    color: AppColors.quarantinedText,
-                    onTap: () {
-                      ref
-                          .read(deliveryFilterProvider.notifier)
-                          .showQuarantined();
-                      ref
-                          .read(activeTabProvider.notifier)
-                          .select(AppTab.deliveries);
-                    },
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.s8),
-                Expanded(
-                  child: _SummaryTile(
-                    label: 'Low-stock items',
-                    value: lowStock,
-                    color: AppColors.slate900,
-                    onTap: () {
-                      ref.read(inventoryFilterProvider.notifier).showLowStock();
-                      ref
-                          .read(activeTabProvider.notifier)
-                          .select(AppTab.inventory);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s16),
-          const SectionLabel('Quick actions'),
-          const SizedBox(height: AppSpacing.s8),
-          SizedBox(
-            height: 44,
-            child: OutlinedButton.icon(
-              onPressed: () => _showNewInspection(context),
-              icon: const Icon(Icons.assignment_add, size: 20),
-              label: const Text('New inspection'),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s16),
-          const SectionLabel('Recent activity'),
-          const SizedBox(height: AppSpacing.s8),
-          for (var index = 0; index < activity.length; index++) ...[
-            if (index > 0) const SizedBox(height: AppSpacing.s8),
-            _ActivityCard(
-              entry: activity[index],
-              onTap: () => _showActivityDetails(context, activity[index]),
-            ),
-          ],
-          const SizedBox(height: AppSpacing.s12),
-          Text(
-            'Last synced 09:40 • All records up to date',
-            style: AppTextStyles.caption.copyWith(fontSize: 11),
-          ),
-          const SizedBox(height: AppSpacing.s8),
-        ],
+        ),
       ),
     );
   }

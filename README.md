@@ -1,9 +1,8 @@
 # Smart Factory Quality & Inventory (Flutter)
 
 Paperless quality-control app for factory shop-floor staff, built on the InvWise
-industrial rules. This drop contains the design system, app shell, Login, Home and
-Inventory screens with dummy data. Scan, Deliveries, Inspection and Trace are
-placeholders for the next iteration.
+industrial rules. It includes the app shell, authentication, Home, Deliveries,
+Inventory, Production Inspection, Trace, and Profile screens.
 
 ## 1. Set up
 
@@ -17,6 +16,10 @@ mkdir -p assets/fonts
 flutter pub get
 flutter run
 ```
+
+Apply `supabase/schema.sql` to the Supabase project before using profile approval,
+dashboard counts, and management. Existing deployments should apply the updated
+profile role/status constraints, low-stock view, and RLS policies as well.
 
 Requires Flutter 3.27+ (uses `CardThemeData`, `WidgetState`, `Color.withValues`).
 Run it in the iPhone 14 simulator (390x844). Fonts are bundled rather than fetched at
@@ -45,20 +48,23 @@ lib/
     theme/app_colors.dart        palette (navy, accent blue, slate, status colours)
     theme/app_theme.dart         spacing, text styles, ThemeData
     utils/format.dart            number / time formatting
-    widgets/                     section_label, status_badge (+PillBadge), offline_banner
+    widgets/                     shared labels, status, offline and responsive widgets
   domain/                        pure Dart, no Flutter/UI imports except enums
     models/                      batch_status, delivery, inventory, activity_entry
     repositories/                stock_movement_repository (append + read only)
     stock_calculator.dart        total stock = SUM(stock_levels), low-stock rule
   data/
-    dummy_data.dart              replace with API / local-queue repositories
+    dummy_data.dart
+    repositories/                Supabase repositories and app settings
   features/
-    auth/login_screen.dart
+    auth/screens/login_page.dart
     home/home_screen.dart
+    deliveries/                  delivery list, details and release flow
+    inspections/                  production inspection form
     inventory/inventory_screen.dart
     profile/profile_screen.dart
-    shared/placeholder_screen.dart
-    scan/ deliveries/ inspection/ trace/   (next iteration)
+    shared/providers/app_state.dart
+    trace/trace_search_screen.dart
 ```
 
 ## 3. How the InvWise rules show up in code
@@ -68,6 +74,8 @@ lib/
 | No client sign-up | `login_screen.dart` has sign-in only, with a note that admins provision accounts |
 | No stored total quantity | `InventoryItem` has no quantity field; `totalStock()` sums `StockLevel`s |
 | Immutable stock movements | `StockMovement` is all-final with no `copyWith`; `StockMovementRepository` exposes only `append` and `history` |
+| Profile access control | Supabase restricts role/status changes to approved Admin/QA Lead accounts |
+| Tab state retention | Global preferences and async collection providers remain alive across tab changes |
 | 48px touch targets | `AppTheme` sets minimum sizes on buttons, inputs, chips, icon buttons; nav bar is 72px; primary buttons are 56px |
 | Status never colour-only | `StatusBadge` pairs colour with icon and text |
 

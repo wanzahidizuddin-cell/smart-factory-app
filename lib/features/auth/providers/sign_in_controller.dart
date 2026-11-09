@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:smart_factory_qc/features/shared/providers/app_state.dart';
 
 /// Handles the sign-in request and exposes loading / error / success
 /// through [AsyncValue].
@@ -14,9 +15,10 @@ class SignInController extends AsyncNotifier<void> {
   }) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
-      // TODO: call the API tier, e.g.
-      // await ref.read(authRepositoryProvider).signIn(email, password);
-      await Future<void>.delayed(const Duration(milliseconds: 800));
+      await ref.read(authRepositoryProvider).signIn(
+            email: email,
+            password: password,
+          );
     });
   }
 }

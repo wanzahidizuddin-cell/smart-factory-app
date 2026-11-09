@@ -9,7 +9,7 @@ void main() {
     final container = ProviderContainer();
     addTearDown(container.dispose);
 
-    container.read(deliveryRepositoryProvider.notifier).release(
+    container.read(deliveryStateProvider.notifier).release(
           'B-1007',
           note: 'Approved exception EX-042',
           authorisedBy: 'Maya Chen',
@@ -17,7 +17,7 @@ void main() {
         );
 
     final record = container
-        .read(deliveryRepositoryProvider)
+        .read(deliveryStateProvider)
         .firstWhere((delivery) => delivery.batchNumber == 'B-1007');
     expect(record.status, BatchStatus.released);
     expect(record.needsReview, isFalse);

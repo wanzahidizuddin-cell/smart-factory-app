@@ -2,6 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_factory_qc/app/sync_status.dart';
 import 'package:smart_factory_qc/data/dummy_data.dart';
+import 'package:smart_factory_qc/data/repositories/auth_repository.dart';
+import 'package:smart_factory_qc/data/repositories/dashboard_repository.dart';
+import 'package:smart_factory_qc/data/repositories/delivery_repository.dart';
+import 'package:smart_factory_qc/data/repositories/inspection_repository.dart';
+import 'package:smart_factory_qc/data/repositories/inventory_repository.dart';
+import 'package:smart_factory_qc/data/repositories/profile_repository.dart';
+import 'package:smart_factory_qc/data/repositories/settings_repository.dart';
+import 'package:smart_factory_qc/data/repositories/trace_repository.dart';
 import 'package:smart_factory_qc/domain/models/activity_entry.dart';
 import 'package:smart_factory_qc/domain/models/audit_event.dart';
 import 'package:smart_factory_qc/domain/models/batch_status.dart';
@@ -9,8 +17,96 @@ import 'package:smart_factory_qc/domain/models/delivery.dart';
 import 'package:smart_factory_qc/domain/models/inspection_record.dart';
 import 'package:smart_factory_qc/domain/models/inventory.dart';
 import 'package:smart_factory_qc/domain/stock_calculator.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum AppTab { home, deliveries, inventory, profile }
+
+final dashboardRepositoryProvider = Provider<DashboardRepository>(
+  (ref) => DashboardRepository(),
+);
+
+final lastSyncProvider = StateProvider<DateTime?>((ref) => null);
+
+final dashboardStatsProvider =
+    AsyncNotifierProvider<DashboardStatsController, DashboardStats>(
+  DashboardStatsController.new,
+);
+
+class DashboardStatsController extends AsyncNotifier<DashboardStats> {
+  @override
+  Future<DashboardStats> build() async {
+    ref.keepAlive();
+    return _fetchAndMarkSync();
+  }
+
+  Future<void> refresh() async {
+    state = const AsyncLoading<DashboardStats>();
+    state = await AsyncValue.guard(_fetchAndMarkSync);
+  }
+
+  Future<DashboardStats> _fetchAndMarkSync() async {
+    final stats =
+        await ref.read(dashboardRepositoryProvider).fetchDashboardStats();
+    ref.read(lastSyncProvider.notifier).state = DateTime.now();
+    return stats;
+  }
+}
+
+final recentActivityProvider = FutureProvider<List<ActivityEntry>>((ref) async {
+  ref.keepAlive();
+  final activity =
+      await ref.watch(dashboardRepositoryProvider).fetchRecentActivity();
+  ref.read(lastSyncProvider.notifier).state = DateTime.now();
+  return activity;
+});
+
+final authRepositoryProvider = Provider<AuthRepository>(
+  (ref) => AuthRepository(),
+);
+
+final authStateProvider = StreamProvider<AuthState>(
+  (ref) => ref.watch(authRepositoryProvider).authStateChanges,
+);
+
+final profileRepositoryProvider = Provider<ProfileRepository>(
+  (ref) => ProfileRepository(),
+);
+
+final currentProfileProvider = FutureProvider<UserProfile>((ref) {
+  ref.keepAlive();
+  return ref.watch(profileRepositoryProvider).fetchCurrentProfile();
+});
+
+final pendingUsersProvider = FutureProvider<List<UserProfile>>((ref) {
+  ref.keepAlive();
+  return ref.watch(profileRepositoryProvider).fetchPendingUsers();
+});
+
+final settingsRepositoryProvider = Provider<SettingsRepository>(
+  (ref) => SettingsRepository(),
+);
+
+class SettingsController extends StateNotifier<AppSettings> {
+  SettingsController(this._repository) : super(_repository.load());
+
+  final SettingsRepository _repository;
+
+  void setLanguage(String value) =>
+      state = _repository.save(state.copyWith(language: value));
+
+  void setCurrency(String value) =>
+      state = _repository.save(state.copyWith(currency: value));
+
+  void setStockUnit(String value) =>
+      state = _repository.save(state.copyWith(stockUnit: value));
+}
+
+final settingsProvider = StateNotifierProvider<SettingsController, AppSettings>(
+  (ref) {
+    ref.keepAlive();
+    return SettingsController(ref.watch(settingsRepositoryProvider));
+  },
+);
 
 class ActiveTabController extends StateNotifier<AppTab> {
   ActiveTabController() : super(AppTab.home);
@@ -27,8 +123,8 @@ void returnToTab(BuildContext context, WidgetRef ref, AppTab tab) {
   Navigator.of(context).popUntil((route) => route.isFirst);
 }
 
-class DeliveryRepository extends StateNotifier<List<Delivery>> {
-  DeliveryRepository() : super(DummyData.deliveries);
+class DeliveryStateController extends StateNotifier<List<Delivery>> {
+  DeliveryStateController() : super(DummyData.deliveries);
 
   Delivery? byBatch(String batchNumber) {
     for (final delivery in state) {
@@ -69,9 +165,29 @@ class DeliveryRepository extends StateNotifier<List<Delivery>> {
   }
 }
 
-final deliveryRepositoryProvider =
-    StateNotifierProvider<DeliveryRepository, List<Delivery>>(
+final deliveryStateProvider =
+    StateNotifierProvider<DeliveryStateController, List<Delivery>>(
+  (ref) => DeliveryStateController(),
+);
+
+final deliveryRepositoryProvider = Provider<DeliveryRepository>(
   (ref) => DeliveryRepository(),
+);
+
+final inspectionRepositoryProvider = Provider<InspectionRepository>(
+  (ref) => InspectionRepository(),
+);
+
+typedef InspectionSubmitter = Future<void> Function(InspectionRecord record);
+
+final inspectionSubmitterProvider = Provider<InspectionSubmitter>(
+  (ref) => ref.watch(inspectionRepositoryProvider).submitInspection,
+);
+
+typedef DeliveryFetcher = Future<List<Delivery>> Function();
+
+final deliveryFetcherProvider = Provider<DeliveryFetcher>(
+  (ref) => () => ref.read(deliveryRepositoryProvider).fetchDeliveries(),
 );
 
 final releaseNoteDraftProvider = StateProvider<String>(
@@ -127,15 +243,6 @@ final deliveryFilterProvider =
   (ref) => DeliveryFilterController(),
 );
 
-typedef DeliveryFetcher = Future<List<Delivery>> Function();
-
-final deliveryFetcherProvider = Provider<DeliveryFetcher>(
-  (ref) => () async {
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    return ref.read(deliveryRepositoryProvider);
-  },
-);
-
 final deliveriesProvider =
     AsyncNotifierProvider<DeliveriesController, List<Delivery>>(
   DeliveriesController.new,
@@ -144,11 +251,11 @@ final deliveriesProvider =
 class DeliveriesController extends AsyncNotifier<List<Delivery>> {
   @override
   Future<List<Delivery>> build() async {
+    ref.keepAlive();
     final sync = ref.watch(syncStatusProvider);
     if (sync.isOffline) {
       throw StateError('Deliveries are unavailable while offline.');
     }
-    ref.watch(deliveryRepositoryProvider);
     return ref.watch(deliveryFetcherProvider)();
   }
 
@@ -260,10 +367,15 @@ class InspectionRecordsController
   void add(InspectionRecord record) => state = [record, ...state];
 }
 
-final inspectionRecordsProvider =
+final inspectionsProvider =
     StateNotifierProvider<InspectionRecordsController, List<InspectionRecord>>(
-  (ref) => InspectionRecordsController(),
+  (ref) {
+    ref.keepAlive();
+    return InspectionRecordsController();
+  },
 );
+
+final inspectionRecordsProvider = inspectionsProvider;
 
 final auditTrailProvider =
     StateNotifierProvider<AuditTrailController, List<AuditEvent>>(
@@ -339,7 +451,20 @@ class AuditTrailController extends StateNotifier<List<AuditEvent>> {
       ];
 }
 
-final traceQueryProvider = StateProvider<String>((ref) => 'B-1007');
+final traceRepositoryProvider = Provider<TraceRepository>(
+  (ref) => TraceRepository(),
+);
+
+final traceQueryProvider = StateProvider<String>((ref) => '');
+
+final traceSearchProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, query) {
+  ref.keepAlive();
+  if (query.trim().isEmpty) {
+    return Future.value(const <Map<String, dynamic>>[]);
+  }
+  return ref.watch(traceRepositoryProvider).searchTraceHistory(query);
+});
 
 final filteredAuditTrailProvider = Provider<List<AuditEvent>>((ref) {
   final query = ref.watch(traceQueryProvider).trim().toLowerCase();
@@ -382,13 +507,14 @@ final inventoryFilterProvider =
   (ref) => InventoryFilterController(),
 );
 
+final inventoryRepositoryProvider = Provider<InventoryRepository>(
+  (ref) => InventoryRepository(),
+);
+
 typedef InventoryFetcher = Future<List<InventoryItem>> Function();
 
 final inventoryFetcherProvider = Provider<InventoryFetcher>(
-  (ref) => () async {
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    return DummyData.inventoryItems;
-  },
+  (ref) => () => ref.read(inventoryRepositoryProvider).fetchInventory(),
 );
 
 final inventoryProvider =
@@ -399,6 +525,7 @@ final inventoryProvider =
 class InventoryController extends AsyncNotifier<List<InventoryItem>> {
   @override
   Future<List<InventoryItem>> build() async {
+    ref.keepAlive();
     final sync = ref.watch(syncStatusProvider);
     if (sync.isOffline) {
       throw StateError('Inventory is unavailable while offline.');
@@ -444,7 +571,7 @@ final filteredInventoryProvider =
 });
 
 class ActivityController extends StateNotifier<List<ActivityEntry>> {
-  ActivityController() : super(DummyData.activity);
+  ActivityController() : super(const []);
 
   void add(ActivityEntry entry) => state = [entry, ...state];
 }

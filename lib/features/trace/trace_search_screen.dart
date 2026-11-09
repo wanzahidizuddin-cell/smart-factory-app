@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_factory_qc/core/theme/app_colors.dart';
 import 'package:smart_factory_qc/core/theme/app_theme.dart';
+import 'package:smart_factory_qc/core/widgets/responsive_content.dart';
 import 'package:smart_factory_qc/core/widgets/section_label.dart';
-import 'package:smart_factory_qc/core/widgets/status_badge.dart';
-import 'package:smart_factory_qc/domain/models/audit_event.dart';
-import 'package:smart_factory_qc/domain/models/batch_status.dart';
 import 'package:smart_factory_qc/features/shared/providers/app_state.dart';
 import 'package:smart_factory_qc/features/shared/widgets/app_bottom_nav_bar.dart';
 
@@ -24,15 +22,9 @@ class _TraceSearchScreenState extends ConsumerState<TraceSearchScreen> {
   @override
   void initState() {
     super.initState();
-    final query = widget.initialQuery;
-    if (query != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(traceQueryProvider.notifier).state = query;
-      });
-    }
-    _searchController = TextEditingController(
-      text: widget.initialQuery ?? 'B-1007',
-    );
+    final query = widget.initialQuery ?? '';
+    _searchController = TextEditingController(text: query);
+    ref.read(traceQueryProvider.notifier).state = query;
   }
 
   @override
@@ -44,13 +36,7 @@ class _TraceSearchScreenState extends ConsumerState<TraceSearchScreen> {
   @override
   Widget build(BuildContext context) {
     final query = ref.watch(traceQueryProvider);
-    final events = ref.watch(filteredAuditTrailProvider);
-    final recordId = query.trim().isEmpty ? 'Search results' : query.trim();
-    final status = ref
-        .watch(deliveryRepositoryProvider)
-        .where((delivery) => delivery.batchNumber == recordId)
-        .firstOrNull
-        ?.status;
+    final results = ref.watch(traceSearchProvider(query));
 
     return Scaffold(
       appBar: AppBar(
@@ -65,7 +51,7 @@ class _TraceSearchScreenState extends ConsumerState<TraceSearchScreen> {
             Text('Trace a record'),
             SizedBox(height: 2),
             Text(
-              'BATCH HISTORY • 18 OCT 2026',
+              'DELIVERIES & INVENTORY',
               style: TextStyle(
                 fontFamily: 'Inter',
                 fontSize: 10,
@@ -76,62 +62,68 @@ class _TraceSearchScreenState extends ConsumerState<TraceSearchScreen> {
           ],
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.s16),
-        children: [
-          const SectionLabel('Search by batch or serial'),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _searchController,
-            onChanged: (value) =>
-                ref.read(traceQueryProvider.notifier).state = value,
-            style: AppTextStyles.body.copyWith(fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'Search by batch or serial',
-              suffixIcon: IconButton(
-                tooltip: 'Search',
-                onPressed: () => ref.read(traceQueryProvider.notifier).state =
-                    _searchController.text,
-                icon: const Icon(Icons.search_rounded),
+      body: ResponsiveContent(
+        maxWidth: 1080,
+        child: ListView(
+          padding: const EdgeInsets.all(AppSpacing.s16),
+          children: [
+            const SectionLabel('Search deliveries and inventory'),
+            const SizedBox(height: AppSpacing.s8),
+            TextField(
+              controller: _searchController,
+              onChanged: (value) =>
+                  ref.read(traceQueryProvider.notifier).state = value,
+              style: AppTextStyles.body.copyWith(fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: 'Batch, supplier, item or SKU',
+                suffixIcon: Icon(Icons.search_rounded),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  recordId,
-                  style: AppTextStyles.mono.copyWith(
-                    color: AppColors.slate900,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
+            const SizedBox(height: AppSpacing.s16),
+            results.when(
+              data: (items) {
+                if (items.isEmpty) {
+                  return Padding(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: AppSpacing.s24),
+                    child: Center(
+                      child: Text(
+                        query.trim().isEmpty
+                            ? 'Enter a search term to find records.'
+                            : 'No matching records found.',
+                        style: AppTextStyles.caption,
+                      ),
+                    ),
+                  );
+                }
+                return Column(
+                  children: [
+                    for (var index = 0; index < items.length; index++) ...[
+                      if (index > 0) const SizedBox(height: AppSpacing.s8),
+                      _TraceResultCard(result: items[index]),
+                    ],
+                  ],
+                );
+              },
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: AppSpacing.s24),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (error, stackTrace) => Card(
+                child: ListTile(
+                  leading: const Icon(Icons.error_outline_rounded),
+                  title: const Text('Unable to search trace history.'),
+                  subtitle: Text(error.toString()),
+                  trailing: IconButton(
+                    tooltip: 'Retry',
+                    onPressed: () => ref.invalidate(traceSearchProvider(query)),
+                    icon: const Icon(Icons.refresh_rounded),
                   ),
                 ),
               ),
-              if (status != null) StatusBadge(status),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const SectionLabel('Audit trail · newest first'),
-          const SizedBox(height: 8),
-          if (events.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 32),
-              child: Center(
-                child: Text(
-                  'No audit events match this record.',
-                  style: AppTextStyles.caption,
-                ),
-              ),
-            )
-          else
-            for (var index = 0; index < events.length; index++)
-              _AuditTimelineItem(
-                event: events[index],
-                isLast: index == events.length - 1,
-              ),
-        ],
+            ),
+          ],
+        ),
       ),
       bottomNavigationBar: AppBottomNavBar(
         selectedIndex: AppTab.deliveries.index,
@@ -141,76 +133,48 @@ class _TraceSearchScreenState extends ConsumerState<TraceSearchScreen> {
   }
 }
 
-class _AuditTimelineItem extends StatelessWidget {
-  const _AuditTimelineItem({required this.event, required this.isLast});
+class _TraceResultCard extends StatelessWidget {
+  const _TraceResultCard({required this.result});
 
-  final AuditEvent event;
-  final bool isLast;
+  final Map<String, dynamic> result;
 
   @override
   Widget build(BuildContext context) {
-    final foreground = switch (event.status) {
-      BatchStatus.passed => AppColors.passed,
-      BatchStatus.quarantined => AppColors.quarantined,
-      BatchStatus.failed => AppColors.failed,
-      BatchStatus.released => AppColors.accent,
-    };
+    final type = result['type'] as String;
+    final isDelivery = type == 'Delivery';
+    final title = isDelivery
+        ? (result['batch_number'] as String? ?? 'Delivery')
+        : (result['name'] as String? ?? 'Inventory item');
+    final details = isDelivery
+        ? [
+            result['supplier'],
+            result['material'],
+            result['material_code'],
+            result['status'],
+          ]
+        : [
+            'SKU ${result['sku']}',
+            result['rack_location'],
+            if (result['current_quantity'] != null)
+              '${result['current_quantity']} ${result['unit'] ?? ''} in stock',
+          ];
+    final subtitle =
+        details.whereType<String>().where((value) => value.isNotEmpty).join(' · ');
 
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 28,
-            child: Column(
-              children: [
-                Icon(event.icon, size: 18, color: foreground),
-                if (!isLast)
-                  Expanded(
-                    child: Container(width: 1, color: AppColors.slate300),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        event.time,
-                        style: AppTextStyles.mono.copyWith(
-                          color: AppColors.slate500,
-                          fontSize: 10,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          event.title,
-                          style:
-                              AppTextStyles.bodyStrong.copyWith(fontSize: 11),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    event.description,
-                    style: AppTextStyles.caption.copyWith(
-                      fontSize: 10,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+    return Card(
+      child: ListTile(
+        leading: Icon(
+          isDelivery
+              ? Icons.local_shipping_outlined
+              : Icons.inventory_2_outlined,
+          color: AppColors.accent,
+        ),
+        title: Text(title, style: AppTextStyles.bodyStrong),
+        subtitle: Text(subtitle, style: AppTextStyles.caption),
+        trailing: Chip(
+          label: Text(type),
+          visualDensity: VisualDensity.compact,
+        ),
       ),
     );
   }

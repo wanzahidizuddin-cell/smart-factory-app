@@ -63,8 +63,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           ..hideCurrentSnackBar()
           ..showSnackBar(
             const SnackBar(
-              content:
-                  Text('Sign in failed. Check your details and try again.'),
+              content: Text(
+                'Sign in failed. Check your email, password, and network '
+                'connection, then try again.',
+              ),
             ),
           );
       } else if ((previous?.isLoading ?? false) && next is AsyncData<void>) {

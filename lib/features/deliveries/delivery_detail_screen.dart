@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_factory_qc/core/theme/app_colors.dart';
 import 'package:smart_factory_qc/core/theme/app_theme.dart';
 import 'package:smart_factory_qc/core/utils/format.dart';
+import 'package:smart_factory_qc/core/widgets/responsive_content.dart';
 import 'package:smart_factory_qc/core/widgets/section_label.dart';
 import 'package:smart_factory_qc/core/widgets/status_badge.dart';
 import 'package:smart_factory_qc/domain/models/audit_event.dart';
@@ -44,7 +45,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final delivery = ref
-        .watch(deliveryRepositoryProvider)
+        .watch(deliveryStateProvider)
         .where((record) => record.batchNumber == widget.batchNumber)
         .firstOrNull;
 
@@ -84,9 +85,11 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
           ],
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        children: [
+      body: ResponsiveContent(
+        maxWidth: 1080,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
           Row(
             children: [
               Expanded(
@@ -195,7 +198,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
                   ? null
                   : () {
                       ref
-                          .read(deliveryRepositoryProvider.notifier)
+                          .read(deliveryStateProvider.notifier)
                           .keepQuarantined(delivery.batchNumber);
                       Navigator.of(context).pop();
                     },
@@ -224,6 +227,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
           ),
         ],
       ),
+      ),
       bottomNavigationBar: AppBottomNavBar(
         selectedIndex: AppTab.deliveries.index,
         onTap: (index) => returnToTab(context, ref, AppTab.values[index]),
@@ -239,7 +243,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
       );
       return;
     }
-    ref.read(deliveryRepositoryProvider.notifier).release(
+    ref.read(deliveryStateProvider.notifier).release(
           delivery.batchNumber,
           note: note,
           authorisedBy: 'Maya Chen, QA lead',

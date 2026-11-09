@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:smart_factory_qc/core/widgets/responsive_content.dart';
 import 'package:smart_factory_qc/features/deliveries/deliveries_screen.dart';
 import 'package:smart_factory_qc/features/home/home_screen.dart';
 import 'package:smart_factory_qc/features/inventory/inventory_screen.dart';
@@ -16,23 +17,27 @@ class AppShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedTab = ref.watch(activeTabProvider);
     return Scaffold(
-      body: IndexedStack(
-        index: selectedTab.index,
-        children: [
-          const HomeScreen(),
-          const DeliveriesScreen(),
-          const InventoryScreen(),
-          ProfileScreen(onSignOut: onSignOut),
-        ],
+      body: ResponsiveContent(
+        child: IndexedStack(
+          index: selectedTab.index,
+          children: [
+            const HomeScreen(),
+            const DeliveriesScreen(),
+            const InventoryScreen(),
+            ProfileScreen(onSignOut: onSignOut),
+          ],
+        ),
       ),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          AppBottomNavBar(
-            selectedIndex: selectedTab.index,
-            onTap: (index) => ref
-                .read(activeTabProvider.notifier)
-                .select(AppTab.values[index]),
+          ResponsiveContent(
+            child: AppBottomNavBar(
+              selectedIndex: selectedTab.index,
+              onTap: (index) => ref
+                  .read(activeTabProvider.notifier)
+                  .select(AppTab.values[index]),
+            ),
           ),
         ],
       ),
