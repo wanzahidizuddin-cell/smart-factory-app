@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_factory_qc/app/sync_status.dart';
 import 'package:smart_factory_qc/core/theme/app_colors.dart';
 import 'package:smart_factory_qc/core/theme/app_theme.dart';
+import 'package:smart_factory_qc/core/widgets/role_gate.dart';
 import 'package:smart_factory_qc/core/widgets/responsive_content.dart';
 import 'package:smart_factory_qc/core/widgets/section_label.dart';
 import 'package:smart_factory_qc/data/repositories/profile_repository.dart';
 import 'package:smart_factory_qc/data/repositories/settings_repository.dart';
+import 'package:smart_factory_qc/domain/models/app_role.dart';
 import 'package:smart_factory_qc/features/shared/providers/app_state.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -18,6 +20,7 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final syncStatus = ref.watch(syncStatusProvider);
     final profile = ref.watch(currentProfileProvider);
+    final userRole = ref.watch(userRoleProvider).valueOrNull;
     final settings = ref.watch(settingsProvider);
 
     return Scaffold(
@@ -62,11 +65,41 @@ class ProfileScreen extends ConsumerWidget {
                     const EdgeInsets.symmetric(horizontal: AppSpacing.s16),
               ),
             ),
-            if (profile.valueOrNull case final user?
-                when _canManageUsers(user.role)) ...[
-              const SizedBox(height: AppSpacing.s16),
-              _userManagementSection(context, ref),
-            ],
+            const SizedBox(height: AppSpacing.s16),
+            RoleGate(
+              allowedRoles: const [
+                AppRole.systemAdmin,
+                AppRole.shiftManager,
+              ],
+              child: _userManagementSection(
+                context,
+                ref,
+                allowAdminPromotion: userRole == AppRole.systemAdmin,
+              ),
+            ),
+            Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.sensors_rounded),
+                    title: const Text('Hardware telemetry'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.of(context).pushNamed('/telemetry'),
+                  ),
+                  const Divider(height: 1),
+                  RoleGate(
+                    allowedRoles: const [AppRole.systemAdmin],
+                    child: ListTile(
+                      leading: const Icon(Icons.history_rounded),
+                      title: const Text('Audit log'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () =>
+                          Navigator.of(context).pushNamed('/audit-logs'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: AppSpacing.s16),
             Card(
               child: Column(
@@ -82,8 +115,7 @@ class ProfileScreen extends ConsumerWidget {
                   const Divider(height: 1),
                   const ListTile(
                     leading: Icon(Icons.info_outline_rounded),
-                    title: Text('App version',
-                        style: AppTextStyles.bodyStrong),
+                    title: Text('App version', style: AppTextStyles.bodyStrong),
                     trailing: Text('v1.0.0+1', style: AppTextStyles.caption),
                   ),
                 ],
@@ -201,7 +233,11 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  Widget _userManagementSection(BuildContext context, WidgetRef ref) {
+  Widget _userManagementSection(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool allowAdminPromotion,
+  }) {
     final pendingUsers = ref.watch(pendingUsersProvider);
     return Card(
       child: Padding(
@@ -236,6 +272,7 @@ class ProfileScreen extends ConsumerWidget {
                         for (final user in users)
                           _PendingUserTile(
                             user: user,
+                            allowAdminPromotion: allowAdminPromotion,
                             onApprove: (role) => _approveUser(
                               context,
                               ref,
@@ -257,11 +294,13 @@ class ProfileScreen extends ConsumerWidget {
 class _PendingUserTile extends StatelessWidget {
   const _PendingUserTile({
     required this.user,
+    required this.allowAdminPromotion,
     required this.onApprove,
     required this.onReject,
   });
 
   final UserProfile user;
+  final bool allowAdminPromotion;
   final ValueChanged<String> onApprove;
   final VoidCallback onReject;
 
@@ -280,13 +319,21 @@ class _PendingUserTile extends StatelessWidget {
             onApprove(role);
           }
         },
-        itemBuilder: (context) => const [
-          PopupMenuItem(value: 'QA', child: Text('Approve as QA')),
-          PopupMenuItem(value: 'QA Lead', child: Text('Approve as QA Lead')),
-          PopupMenuItem(value: 'Warehouse', child: Text('Approve as Warehouse')),
-          PopupMenuItem(value: 'Admin', child: Text('Approve as Admin')),
-          PopupMenuDivider(),
-          PopupMenuItem(
+        itemBuilder: (context) => [
+          const PopupMenuItem(value: 'QA', child: Text('Approve as QA')),
+          const PopupMenuItem(
+            value: 'QA Lead',
+            child: Text('Approve as QA Lead'),
+          ),
+          const PopupMenuItem(
+            value: 'Warehouse',
+            child: Text('Approve as Warehouse'),
+          ),
+          if (allowAdminPromotion)
+            const PopupMenuItem(
+                value: 'Admin', child: Text('Approve as Admin')),
+          const PopupMenuDivider(),
+          const PopupMenuItem(
             value: 'reject',
             child: Text('Reject user', style: TextStyle(color: Colors.red)),
           ),
@@ -295,11 +342,6 @@ class _PendingUserTile extends StatelessWidget {
       ),
     );
   }
-}
-
-bool _canManageUsers(String role) {
-  final normalized = role.trim().toLowerCase();
-  return normalized == 'admin' || normalized == 'qa lead';
 }
 
 Future<void> _editPersonalDetails(
@@ -428,7 +470,9 @@ Future<void> _changePassword(BuildContext context, WidgetRef ref) async {
     await ref.read(profileRepositoryProvider).changePassword(password);
     if (context.mounted) _showMessage(context, 'Password updated.');
   } catch (error) {
-    if (context.mounted) _showMessage(context, 'Could not change password: $error');
+    if (context.mounted) {
+      _showMessage(context, 'Could not change password: $error');
+    }
   } finally {
     passwordController.dispose();
     confirmationController.dispose();
@@ -453,7 +497,9 @@ Future<void> _approveUser(
       _showMessage(context, '${user.fullName} approved as $role.');
     }
   } catch (error) {
-    if (context.mounted) _showMessage(context, 'Could not approve user: $error');
+    if (context.mounted) {
+      _showMessage(context, 'Could not approve user: $error');
+    }
   }
 }
 

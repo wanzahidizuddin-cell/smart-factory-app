@@ -207,6 +207,22 @@ class _ProductionInspectionScreenState
                       child: Text('Misalignment'),
                     ),
                     DropdownMenuItem(value: 'Burr', child: Text('Burr')),
+                    DropdownMenuItem(
+                      value: 'Thermal Failure',
+                      child: Text('Thermal Failure'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Sector Read Error',
+                      child: Text('Sector Read Error'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Physical Damage',
+                      child: Text('Physical Damage'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Connector Bent',
+                      child: Text('Connector Bent'),
+                    ),
                   ],
                   onChanged: (value) {
                     if (value != null) controller.setDefectCategory(value);
@@ -214,7 +230,8 @@ class _ProductionInspectionScreenState
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Categories: Scratch · Crack · Misalignment · Burr',
+                  'Storage QC: Thermal Failure · Sector Read Error · '
+                  'Physical Damage · Connector Bent',
                   style: AppTextStyles.caption.copyWith(fontSize: 10),
                 ),
                 const SizedBox(height: 8),
@@ -244,6 +261,8 @@ class _ProductionInspectionScreenState
                   onChanged: controller.setNotes,
                   decoration: const InputDecoration(
                     contentPadding: EdgeInsets.all(10),
+                    hintText:
+                        'E.g., Passed physical inspection, Failed thermal throttling stress test...',
                   ),
                   validator: (value) => value == null || value.trim().isEmpty
                       ? 'Enter inspection notes'
@@ -311,7 +330,7 @@ class _ProductionInspectionScreenState
       await ref.read(inspectionSubmitterProvider)(record);
       if (!mounted) return;
 
-      ref.read(inspectionRecordsProvider.notifier).add(record);
+      ref.invalidate(inspectionRecordsProvider);
       ref.invalidate(recentActivityProvider);
       ref.read(auditTrailProvider.notifier).add(
             AuditEvent(

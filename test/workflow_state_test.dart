@@ -34,18 +34,18 @@ void main() {
     expect(results.single.recordId, 'SN-20481');
   });
 
-  test('offline sync clears queued records after its delay', () async {
+  test('offline simulation does not clear queued records', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);
     final sync = container.read(syncStatusProvider.notifier);
 
+    sync.update(pendingRecords: 3);
     sync.setOffline(true);
     expect(container.read(syncStatusProvider).pendingRecords, 3);
-    final future = sync.sync();
-    expect(container.read(syncStatusProvider).isSyncing, isTrue);
-    await future;
+
+    sync.setOffline(false);
     expect(container.read(syncStatusProvider).isOffline, isFalse);
-    expect(container.read(syncStatusProvider).pendingRecords, 0);
+    expect(container.read(syncStatusProvider).pendingRecords, 3);
     expect(container.read(syncStatusProvider).isSyncing, isFalse);
   });
 }

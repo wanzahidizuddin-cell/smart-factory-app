@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_factory_qc/app/sync_status.dart';
+import 'package:smart_factory_qc/data/repositories/audit_log_repository.dart';
 import 'package:smart_factory_qc/data/dummy_data.dart';
 import 'package:smart_factory_qc/data/repositories/auth_repository.dart';
 import 'package:smart_factory_qc/data/repositories/dashboard_repository.dart';
@@ -8,14 +11,20 @@ import 'package:smart_factory_qc/data/repositories/delivery_repository.dart';
 import 'package:smart_factory_qc/data/repositories/inspection_repository.dart';
 import 'package:smart_factory_qc/data/repositories/inventory_repository.dart';
 import 'package:smart_factory_qc/data/repositories/profile_repository.dart';
+import 'package:smart_factory_qc/data/repositories/qc_repository.dart';
 import 'package:smart_factory_qc/data/repositories/settings_repository.dart';
+import 'package:smart_factory_qc/data/repositories/supabase_stock_movement_repository.dart';
 import 'package:smart_factory_qc/data/repositories/trace_repository.dart';
+import 'package:smart_factory_qc/data/services/sync_service.dart';
 import 'package:smart_factory_qc/domain/models/activity_entry.dart';
+import 'package:smart_factory_qc/domain/models/app_role.dart';
+import 'package:smart_factory_qc/domain/models/audit_log_record.dart';
 import 'package:smart_factory_qc/domain/models/audit_event.dart';
 import 'package:smart_factory_qc/domain/models/batch_status.dart';
 import 'package:smart_factory_qc/domain/models/delivery.dart';
 import 'package:smart_factory_qc/domain/models/inspection_record.dart';
 import 'package:smart_factory_qc/domain/models/inventory.dart';
+import 'package:smart_factory_qc/domain/repositories/stock_movement_repository.dart';
 import 'package:smart_factory_qc/domain/stock_calculator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -68,13 +77,35 @@ final authStateProvider = StreamProvider<AuthState>(
   (ref) => ref.watch(authRepositoryProvider).authStateChanges,
 );
 
+final syncServiceProvider = Provider<SyncService>((ref) {
+  final statusController = ref.read(syncStatusProvider.notifier);
+  final service = SyncService(
+    canSync: () =>
+        !ref.read(syncStatusProvider).isOffline &&
+        ref.read(authRepositoryProvider).currentUser != null,
+    onNetworkChanged: statusController.setConnectivityOffline,
+    onStateChanged: statusController.update,
+  );
+  statusController.setSyncHandler(service.syncPending);
+  ref.onDispose(() => unawaited(service.dispose()));
+  unawaited(service.start());
+  return service;
+});
+
 final profileRepositoryProvider = Provider<ProfileRepository>(
   (ref) => ProfileRepository(),
 );
 
 final currentProfileProvider = FutureProvider<UserProfile>((ref) {
   ref.keepAlive();
+  ref.watch(authStateProvider);
   return ref.watch(profileRepositoryProvider).fetchCurrentProfile();
+});
+
+final userRoleProvider = Provider<AsyncValue<AppRole?>>((ref) {
+  return ref.watch(currentProfileProvider).whenData(
+        (profile) => profile.status == 'approved' ? profile.appRole : null,
+      );
 });
 
 final pendingUsersProvider = FutureProvider<List<UserProfile>>((ref) {
@@ -175,7 +206,15 @@ final deliveryRepositoryProvider = Provider<DeliveryRepository>(
 );
 
 final inspectionRepositoryProvider = Provider<InspectionRepository>(
-  (ref) => InspectionRepository(),
+  (ref) => InspectionRepository(
+    syncPending: () => ref.read(syncServiceProvider).syncPending(),
+  ),
+);
+
+final stockMovementRepositoryProvider = Provider<StockMovementRepository>(
+  (ref) => SupabaseStockMovementRepository(
+    syncPending: () => ref.read(syncServiceProvider).syncPending(),
+  ),
 );
 
 typedef InspectionSubmitter = Future<void> Function(InspectionRecord record);
@@ -183,6 +222,16 @@ typedef InspectionSubmitter = Future<void> Function(InspectionRecord record);
 final inspectionSubmitterProvider = Provider<InspectionSubmitter>(
   (ref) => ref.watch(inspectionRepositoryProvider).submitInspection,
 );
+
+final qcRepositoryProvider = Provider<QcRepository>(
+  (ref) => QcRepository(),
+);
+
+final inspectionsProvider = FutureProvider<List<InspectionRecord>>(
+  (ref) => ref.watch(qcRepositoryProvider).fetchInspections(),
+);
+
+final inspectionRecordsProvider = inspectionsProvider;
 
 typedef DeliveryFetcher = Future<List<Delivery>> Function();
 
@@ -252,8 +301,9 @@ class DeliveriesController extends AsyncNotifier<List<Delivery>> {
   @override
   Future<List<Delivery>> build() async {
     ref.keepAlive();
-    final sync = ref.watch(syncStatusProvider);
-    if (sync.isOffline) {
+    final isOffline =
+        ref.watch(syncStatusProvider.select((status) => status.isOffline));
+    if (isOffline) {
       throw StateError('Deliveries are unavailable while offline.');
     }
     return ref.watch(deliveryFetcherProvider)();
@@ -360,22 +410,37 @@ final inspectionDraftProvider =
   (ref) => InspectionController(),
 );
 
-class InspectionRecordsController
-    extends StateNotifier<List<InspectionRecord>> {
-  InspectionRecordsController() : super(const []);
-
-  void add(InspectionRecord record) => state = [record, ...state];
-}
-
-final inspectionsProvider =
-    StateNotifierProvider<InspectionRecordsController, List<InspectionRecord>>(
-  (ref) {
-    ref.keepAlive();
-    return InspectionRecordsController();
-  },
+final auditLogRepositoryProvider = Provider<AuditLogRepository>(
+  (ref) => AuditLogRepository(),
 );
 
-final inspectionRecordsProvider = inspectionsProvider;
+final auditLogsProvider = FutureProvider<List<AuditLogRecord>>((ref) {
+  return ref.watch(auditLogRepositoryProvider).fetchLogs();
+});
+
+final auditLogSearchProvider = StateProvider<String>((ref) => '');
+final auditLogModuleFilterProvider = StateProvider<String>((ref) => 'all');
+final auditLogUserFilterProvider = StateProvider<String>((ref) => 'all');
+
+final filteredAuditLogsProvider = Provider<AsyncValue<List<AuditLogRecord>>>(
+  (ref) {
+    final query = ref.watch(auditLogSearchProvider).trim().toLowerCase();
+    final module = ref.watch(auditLogModuleFilterProvider);
+    final userId = ref.watch(auditLogUserFilterProvider);
+    return ref.watch(auditLogsProvider).whenData(
+          (records) => records.where((record) {
+            final matchesQuery = query.isEmpty ||
+                record.module.toLowerCase().contains(query) ||
+                record.actionType.toLowerCase().contains(query) ||
+                record.userId.toLowerCase().contains(query) ||
+                record.recordId.toLowerCase().contains(query);
+            return matchesQuery &&
+                (module == 'all' || record.module == module) &&
+                (userId == 'all' || record.userId == userId);
+          }).toList(growable: false),
+        );
+  },
+);
 
 final auditTrailProvider =
     StateNotifierProvider<AuditTrailController, List<AuditEvent>>(
@@ -514,7 +579,9 @@ final inventoryRepositoryProvider = Provider<InventoryRepository>(
 typedef InventoryFetcher = Future<List<InventoryItem>> Function();
 
 final inventoryFetcherProvider = Provider<InventoryFetcher>(
-  (ref) => () => ref.read(inventoryRepositoryProvider).fetchInventory(),
+  (ref) => () => ref.read(inventoryRepositoryProvider).fetchInventory(
+        preferCache: ref.read(syncStatusProvider).isOffline,
+      ),
 );
 
 final inventoryProvider =
@@ -526,20 +593,13 @@ class InventoryController extends AsyncNotifier<List<InventoryItem>> {
   @override
   Future<List<InventoryItem>> build() async {
     ref.keepAlive();
-    final sync = ref.watch(syncStatusProvider);
-    if (sync.isOffline) {
-      throw StateError('Inventory is unavailable while offline.');
-    }
+    ref.watch(syncStatusProvider.select((status) => status.isOffline));
     return ref.watch(inventoryFetcherProvider)();
   }
 
   Future<void> fetch() async {
     state = const AsyncLoading<List<InventoryItem>>();
-    final sync = ref.read(syncStatusProvider);
     state = await AsyncValue.guard(() async {
-      if (sync.isOffline) {
-        throw StateError('Inventory is unavailable while offline.');
-      }
       return ref.read(inventoryFetcherProvider)();
     });
   }
@@ -557,6 +617,7 @@ final filteredInventoryProvider =
       final matchesQuery = query.isEmpty ||
           item.sku.toLowerCase().contains(query) ||
           item.name.toLowerCase().contains(query) ||
+          (item.rackLocation?.toLowerCase().contains(query) ?? false) ||
           itemLocations
               .any((level) => level.locationId.toLowerCase().contains(query));
       return matchesQuery && (!filter.lowStockOnly || isLowStock(item, levels));

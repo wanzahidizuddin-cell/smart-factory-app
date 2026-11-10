@@ -75,7 +75,8 @@ class _TraceSearchScreenState extends ConsumerState<TraceSearchScreen> {
                   ref.read(traceQueryProvider.notifier).state = value,
               style: AppTextStyles.body.copyWith(fontSize: 13),
               decoration: const InputDecoration(
-                hintText: 'Batch, supplier, item or SKU',
+                hintText:
+                    'Search SKUs (e.g., WD-BLU...), Batch, or Supplier...',
                 suffixIcon: Icon(Icons.search_rounded),
               ),
             ),
@@ -89,8 +90,8 @@ class _TraceSearchScreenState extends ConsumerState<TraceSearchScreen> {
                     child: Center(
                       child: Text(
                         query.trim().isEmpty
-                            ? 'Enter a search term to find records.'
-                            : 'No matching records found.',
+                            ? 'Search storage drive SKUs, batches, or suppliers.'
+                            : 'No storage drives or batches match your criteria.',
                         style: AppTextStyles.caption,
                       ),
                     ),
@@ -145,6 +146,9 @@ class _TraceResultCard extends StatelessWidget {
     final title = isDelivery
         ? (result['batch_number'] as String? ?? 'Delivery')
         : (result['name'] as String? ?? 'Inventory item');
+    final materialName =
+        '${result['material'] ?? ''} ${result['name'] ?? ''}'.toLowerCase();
+    final status = (result['status'] as String? ?? '').toLowerCase();
     final details = isDelivery
         ? [
             result['supplier'],
@@ -158,19 +162,33 @@ class _TraceResultCard extends StatelessWidget {
             if (result['current_quantity'] != null)
               '${result['current_quantity']} ${result['unit'] ?? ''} in stock',
           ];
-    final subtitle =
-        details.whereType<String>().where((value) => value.isNotEmpty).join(' · ');
+    final subtitle = details
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .join(' · ');
 
     return Card(
       child: ListTile(
         leading: Icon(
-          isDelivery
-              ? Icons.local_shipping_outlined
-              : Icons.inventory_2_outlined,
+          status == 'quarantined'
+              ? Icons.thermostat
+              : materialName.contains('nvme')
+                  ? Icons.memory
+                  : Icons.storage,
           color: AppColors.accent,
         ),
-        title: Text(title, style: AppTextStyles.bodyStrong),
-        subtitle: Text(subtitle, style: AppTextStyles.caption),
+        title: Text(
+          title,
+          style: AppTextStyles.bodyStrong,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          subtitle,
+          style: AppTextStyles.caption,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
         trailing: Chip(
           label: Text(type),
           visualDensity: VisualDensity.compact,

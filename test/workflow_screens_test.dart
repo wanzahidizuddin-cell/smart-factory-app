@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:smart_factory_qc/data/repositories/qc_repository.dart';
 import 'package:smart_factory_qc/domain/models/batch_status.dart';
+import 'package:smart_factory_qc/domain/models/inspection_record.dart';
 import 'package:smart_factory_qc/data/repositories/trace_repository.dart';
 import 'package:smart_factory_qc/features/deliveries/batch_released_screen.dart';
 import 'package:smart_factory_qc/features/deliveries/delivery_detail_screen.dart';
@@ -45,9 +47,15 @@ void main() {
   });
 
   testWidgets('inspection form attaches a photo and signs off', (tester) async {
+    final submittedRecords = <InspectionRecord>[];
     final container = ProviderContainer(
       overrides: [
-        inspectionSubmitterProvider.overrideWithValue((_) async {}),
+        inspectionSubmitterProvider.overrideWithValue(
+          (record) async => submittedRecords.add(record),
+        ),
+        qcRepositoryProvider.overrideWithValue(
+          _FakeQcRepository(() => submittedRecords),
+        ),
       ],
     );
     addTearDown(container.dispose);
@@ -82,7 +90,10 @@ void main() {
     await tester.ensureVisible(find.text('Sign off'));
     await tester.tap(find.text('Sign off'));
     await tester.pumpAndSettle();
-    expect(container.read(inspectionRecordsProvider), hasLength(1));
+    expect(
+      await container.read(inspectionRecordsProvider.future),
+      hasLength(1),
+    );
     expect(
       find.text('Inspection signed off successfully.'),
       findsOneWidget,
@@ -95,6 +106,9 @@ void main() {
       overrides: [
         inspectionSubmitterProvider.overrideWithValue(
           (_) => Future<void>.error(StateError('submission failed')),
+        ),
+        qcRepositoryProvider.overrideWithValue(
+          _FakeQcRepository(() => const []),
         ),
       ],
     );
@@ -134,7 +148,10 @@ void main() {
       find.text('Could not submit inspection: Bad state: submission failed'),
       findsOneWidget,
     );
-    expect(container.read(inspectionRecordsProvider), isEmpty);
+    expect(
+      await container.read(inspectionRecordsProvider.future),
+      isEmpty,
+    );
   });
 
   testWidgets('trace screen searches and displays matching records',
@@ -153,7 +170,10 @@ void main() {
     );
 
     await tester.pumpAndSettle();
-    expect(find.text('Enter a search term to find records.'), findsOneWidget);
+    expect(
+      find.text('Search storage drive SKUs, batches, or suppliers.'),
+      findsOneWidget,
+    );
     await tester.enterText(
       find.byType(TextField),
       'resin',
@@ -168,6 +188,15 @@ void main() {
       findsOneWidget,
     );
   });
+}
+
+class _FakeQcRepository implements QcRepository {
+  _FakeQcRepository(this.records);
+
+  final List<InspectionRecord> Function() records;
+
+  @override
+  Future<List<InspectionRecord>> fetchInspections() async => records();
 }
 
 class _FakeTraceRepository extends TraceRepository {

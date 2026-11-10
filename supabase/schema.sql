@@ -127,6 +127,12 @@ alter table public.inventory_items enable row level security;
 alter table public.inspections enable row level security;
 alter table public.audit_events enable row level security;
 
+alter table public.inspections
+  add column if not exists client_action_id text;
+create unique index if not exists inspections_client_action_id_idx
+  on public.inspections (client_action_id)
+  where client_action_id is not null;
+
 drop policy if exists profiles_authenticated_read on public.profiles;
 create policy profiles_authenticated_read
   on public.profiles for select to authenticated
@@ -166,6 +172,7 @@ create policy profiles_management_update
       where p.id = (select auth.uid())
         and p.role in ('Admin', 'QA Lead')
         and p.status = 'approved'
+        and (p.role = 'Admin' or profiles.role <> 'Admin')
     )
   );
 
@@ -181,10 +188,21 @@ begin
       select 1
       from public.profiles p
       where p.id = (select auth.uid())
-        and p.role in ('Admin', 'QA Lead')
+        and p.role = 'Admin'
         and p.status = 'approved'
+    )
+    and (
+      new.role = 'Admin'
+      or not exists (
+        select 1
+        from public.profiles p
+        where p.id = (select auth.uid())
+          and p.role = 'QA Lead'
+          and p.status = 'approved'
+      )
     ) then
-    raise exception 'Only approved administrators may change profile access';
+    raise exception
+      'Only approved Admin or QA Lead accounts may change profile access; only Admin may assign Admin';
   end if;
   return new;
 end;
@@ -403,3 +421,162 @@ drop trigger if exists audit_events_prevent_mutation on public.audit_events;
 create trigger audit_events_prevent_mutation
   before update or delete on public.audit_events
   for each row execute function public.prevent_audit_event_mutation();
+
+create table if not exists public.audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  action_id text not null unique,
+  action_type text not null,
+  user_id uuid not null references public.profiles (id) on delete restrict,
+  module text not null,
+  record_id text not null,
+  previous_state jsonb,
+  new_state jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists audit_logs_created_at_idx
+  on public.audit_logs (created_at desc);
+create index if not exists audit_logs_module_created_at_idx
+  on public.audit_logs (module, created_at desc);
+create index if not exists audit_logs_user_created_at_idx
+  on public.audit_logs (user_id, created_at desc);
+
+alter table public.audit_logs enable row level security;
+
+drop policy if exists audit_logs_admin_read on public.audit_logs;
+create policy audit_logs_admin_read
+  on public.audit_logs for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.profiles p
+      where p.id = (select auth.uid())
+        and p.role = 'Admin'
+        and p.status = 'approved'
+    )
+  );
+
+drop policy if exists audit_logs_actor_read on public.audit_logs;
+create policy audit_logs_actor_read
+  on public.audit_logs for select to authenticated
+  using (user_id = (select auth.uid()));
+
+drop policy if exists audit_logs_actor_insert on public.audit_logs;
+create policy audit_logs_actor_insert
+  on public.audit_logs for insert to authenticated
+  with check (
+    user_id = (select auth.uid())
+    and exists (
+      select 1
+      from public.profiles p
+      where p.id = (select auth.uid())
+        and p.status = 'approved'
+    )
+  );
+
+create table if not exists public.hardware_devices (
+  device_id text primary key,
+  name text not null,
+  type text not null,
+  battery_level integer not null default 100
+    check (battery_level between 0 and 100),
+  firmware_version text not null default '',
+  status text not null default 'online'
+    check (status in ('online', 'offline', 'warning')),
+  last_ping timestamptz
+);
+
+alter table public.hardware_devices enable row level security;
+
+drop policy if exists hardware_devices_admin_read on public.hardware_devices;
+create policy hardware_devices_admin_read
+  on public.hardware_devices for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.profiles p
+      where p.id = (select auth.uid())
+        and p.role = 'Admin'
+        and p.status = 'approved'
+    )
+  );
+
+drop policy if exists hardware_devices_admin_insert on public.hardware_devices;
+create policy hardware_devices_admin_insert
+  on public.hardware_devices for insert to authenticated
+  with check (
+    exists (
+      select 1
+      from public.profiles p
+      where p.id = (select auth.uid())
+        and p.role = 'Admin'
+        and p.status = 'approved'
+    )
+  );
+
+drop policy if exists hardware_devices_admin_update on public.hardware_devices;
+create policy hardware_devices_admin_update
+  on public.hardware_devices for update to authenticated
+  using (
+    exists (
+      select 1
+      from public.profiles p
+      where p.id = (select auth.uid())
+        and p.role = 'Admin'
+        and p.status = 'approved'
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.profiles p
+      where p.id = (select auth.uid())
+        and p.role = 'Admin'
+        and p.status = 'approved'
+    )
+  );
+
+grant select, insert on public.audit_logs to authenticated;
+grant select, insert, update on public.hardware_devices to authenticated;
+
+create table if not exists public.stock_movements (
+  id text primary key not null,
+  client_action_id text not null unique,
+  item_id uuid not null references public.inventory_items (id) on delete restrict,
+  location_id text not null,
+  delta numeric(14, 3) not null check (delta <> 0),
+  reason text not null,
+  performed_by uuid not null references public.profiles (id) on delete restrict,
+  recorded_at timestamptz not null default now(),
+  batch_number text
+);
+
+create index if not exists stock_movements_item_recorded_at_idx
+  on public.stock_movements (item_id, recorded_at desc);
+create index if not exists stock_movements_batch_recorded_at_idx
+  on public.stock_movements (batch_number, recorded_at desc);
+
+alter table public.stock_movements enable row level security;
+
+drop policy if exists stock_movements_authenticated_read
+  on public.stock_movements;
+create policy stock_movements_authenticated_read
+  on public.stock_movements for select to authenticated
+  using (true);
+
+drop policy if exists stock_movements_authorized_insert
+  on public.stock_movements;
+create policy stock_movements_authorized_insert
+  on public.stock_movements for insert to authenticated
+  with check (
+    performed_by = (select auth.uid())
+    and exists (
+      select 1
+      from public.profiles p
+      where p.id = (select auth.uid())
+        and p.role in ('Admin', 'Warehouse')
+        and p.status = 'approved'
+    )
+  );
+
+grant select, insert on public.stock_movements to authenticated;

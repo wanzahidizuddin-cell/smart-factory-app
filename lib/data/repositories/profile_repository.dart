@@ -1,4 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:smart_factory_qc/domain/models/app_role.dart';
+import 'package:smart_factory_qc/data/services/audit_log_service.dart';
 
 class UserProfile {
   const UserProfile({
@@ -22,6 +24,8 @@ class UserProfile {
   final String employeeId;
   final String role;
   final String status;
+
+  AppRole get appRole => AppRole.fromDatabase(role);
 }
 
 class ProfileRepository {
@@ -54,10 +58,22 @@ class ProfileRepository {
       throw StateError('Sign in before updating your profile.');
     }
 
-    await _client.from('profiles').update({
+    final before = await _client
+        .from('profiles')
+        .select('full_name, employee_id')
+        .eq('id', userId)
+        .single();
+    final after = {
       'full_name': fullName.trim(),
       'employee_id': employeeId.trim(),
-    }).eq('id', userId);
+    };
+    await _client.from('profiles').update(after).eq('id', userId);
+    await _auditProfileChange(
+      actionType: 'profile_updated',
+      recordId: userId,
+      previousState: before,
+      newState: after,
+    );
   }
 
   Future<void> changePassword(String password) async {
@@ -83,15 +99,60 @@ class ProfileRepository {
       throw ArgumentError.value(role, 'role', 'Unsupported profile role.');
     }
 
-    await _client.from('profiles').update({
+    final before = await _client
+        .from('profiles')
+        .select('full_name, employee_id, role, status')
+        .eq('id', userId)
+        .single();
+    final after = {
       'role': role,
       'status': 'approved',
-    }).eq('id', userId);
+    };
+    await _client.from('profiles').update(after).eq('id', userId);
+    await _auditProfileChange(
+      actionType: 'profile_approved',
+      recordId: userId,
+      previousState: before,
+      newState: {...before, ...after},
+    );
   }
 
   Future<void> rejectUser(String userId) async {
-    await _client
+    final before = await _client
         .from('profiles')
-        .update({'status': 'rejected'}).eq('id', userId);
+        .select('full_name, employee_id, role, status')
+        .eq('id', userId)
+        .single();
+    const after = {'status': 'rejected'};
+    await _client.from('profiles').update(after).eq('id', userId);
+    await _auditProfileChange(
+      actionType: 'profile_rejected',
+      recordId: userId,
+      previousState: before,
+      newState: {...before, ...after},
+    );
+  }
+
+  Future<void> _auditProfileChange({
+    required String actionType,
+    required String recordId,
+    required Map<String, dynamic> previousState,
+    required Map<String, dynamic> newState,
+  }) async {
+    final actorId = _client.auth.currentUser?.id;
+    if (actorId == null) {
+      throw StateError('Sign in before recording profile changes.');
+    }
+    final actionId =
+        'profile-$recordId-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    await AuditLogService(_client).record(
+      actionId: actionId,
+      actionType: actionType,
+      userId: actorId,
+      module: 'profiles',
+      recordId: recordId,
+      previousState: previousState,
+      newState: newState,
+    );
   }
 }

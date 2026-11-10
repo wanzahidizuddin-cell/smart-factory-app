@@ -82,7 +82,49 @@ lib/
 The client-side rules are a convenience. The server must still enforce them (no UPDATE/DELETE
 grants on the movements table, server-only user creation).
 
-## 4. Next iteration
-Scan (`mobile_scanner`), Deliveries list + detail, Inspection form (`image_picker`),
-Trace timeline, then swap `DummyData` for repositories and drive `SyncStatus` from
-`connectivity_plus` plus a drift queue.
+## 4. Current scope
+
+The current app includes Deliveries, Inventory, Production Inspection, Trace,
+offline inventory caching, queued inspection sync, role-gated user management,
+an admin audit log, and simulated hardware telemetry.
+
+## 5. Offline sync and role-protected features
+
+The app uses Drift/SQLite for the local inventory cache and a durable `sync_queue`.
+Inspections and append-only stock movements are written to the queue before any
+network request; queued actions are retried on connectivity changes and remain
+visible in Sync status when a server mutation fails.
+
+User roles map the existing `profiles.role` values (`Admin`, `QA Lead`, `QA`,
+`Warehouse`) to the app's `AppRole`. Admin-only audit history and Admin/QA Lead
+user management are guarded in the UI; Supabase RLS remains authoritative.
+Hardware telemetry is currently a deterministic-shape mock stream, not a live
+device connection.
+
+Apply the updated `supabase/schema.sql` to add inspection idempotency, audit
+logging, and the hardware device registry. Existing deployments should apply the
+whole idempotent schema in the Supabase SQL editor after taking their normal
+database backup.
+
+## 6. Activation portal (React)
+
+The separate `activation-portal/` app is a Vite + React + TypeScript admin portal.
+Install and run it with:
+
+```powershell
+cd activation-portal
+npm install
+Copy-Item .env.example .env.local
+# Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local
+npm run dev
+```
+
+The portal accepts approved Admin sign-ins only. Employee invitations are
+created through the `provision-employee` Supabase Edge Function, which validates
+the caller's role server-side and uses the service-role key only in the function
+environment. Never put a service-role key in the portal's `VITE_*` variables.
+Deploy the function with `supabase functions deploy provision-employee` after
+applying the schema and setting the function's service-role secret with
+`supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<service-role-secret>"`.
+Keep that value out of the portal environment and source control. Bulk CSV
+imports require the columns `full_name`, `employee_id`, `email`, and `role`.

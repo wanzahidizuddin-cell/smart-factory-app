@@ -1,6 +1,4 @@
-/// Catalogue record. INTENTIONALLY has no `quantity` field:
-/// total stock is always derived by summing [StockLevel]s
-/// (see stock_calculator.dart).
+/// Inventory catalogue record, including the current Supabase stock snapshot.
 class InventoryItem {
   const InventoryItem({
     required this.id,
@@ -9,6 +7,8 @@ class InventoryItem {
     required this.unit,
     required this.reorderLevel,
     required this.targetLevel,
+    this.currentQuantity,
+    this.rackLocation,
     this.supplier = 'Northworks Supply',
     this.specifications = 'Standard production material',
   });
@@ -23,6 +23,8 @@ class InventoryItem {
 
   /// Full-bar reference for the stock-level bar (configuration, not stock).
   final double targetLevel;
+  final double? currentQuantity;
+  final String? rackLocation;
   final String supplier;
   final String specifications;
 }

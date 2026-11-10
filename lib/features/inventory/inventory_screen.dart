@@ -57,7 +57,8 @@ class InventoryScreen extends ConsumerWidget {
                       ref.read(inventoryFilterProvider.notifier).setQuery,
                   style: AppTextStyles.body,
                   decoration: const InputDecoration(
-                    hintText: 'Search item or rack',
+                    hintText:
+                        'Search SKUs (e.g., WD-BLU...), Batch, or Supplier...',
                     suffixIcon:
                         Icon(Icons.search_rounded, color: AppColors.slate500),
                   ),
@@ -97,13 +98,13 @@ class InventoryScreen extends ConsumerWidget {
                   final noFilters =
                       filter.query.isEmpty && !filter.lowStockOnly;
                   return CollectionEmptyState(
-                    icon: Icons.inventory_2_outlined,
+                    icon: Icons.storage,
                     title: noFilters
-                        ? 'No inventory items yet'
-                        : 'No matching items',
+                        ? 'No storage drives yet'
+                        : 'No matching storage drives',
                     description: noFilters
-                        ? 'Materials will appear here after your first delivery is received and recorded.'
-                        : 'Try a different search or filter. Matching materials will appear here.',
+                        ? 'HDD and SSD inventory will appear here after a delivery is received and recorded.'
+                        : 'No storage drives found matching your criteria. Try another SKU, rack, or stock filter.',
                     actionLabel: 'Refresh',
                     footer: 'Showing all records • Assembly plant 01',
                     onAction: () =>
@@ -174,14 +175,17 @@ class _InventoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = totalStock(item.id, levels);
+    final total = currentStock(item, levels);
     final low = total <= item.reorderLevel;
     final fill = item.targetLevel == 0
         ? 0.0
         : (total / item.targetLevel).clamp(0.0, 1.0);
     final locations = levels.where((level) => level.itemId == item.id).toList();
-    final primaryLocation =
-        locations.isEmpty ? 'No rack assigned' : locations.first.locationId;
+    final primaryLocation = item.rackLocation?.isNotEmpty == true
+        ? item.rackLocation!
+        : locations.isEmpty
+            ? 'No rack assigned'
+            : locations.first.locationId;
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -213,15 +217,33 @@ class _InventoryCard extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.s4),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.s8),
+                    child: Icon(
+                      item.name.toLowerCase().contains('nvme')
+                          ? Icons.memory
+                          : Icons.storage,
+                      color: AppColors.accent,
+                      size: 18,
+                    ),
+                  ),
                   Expanded(
                     child: Text(
                       item.name,
                       style: AppTextStyles.bodyStrong.copyWith(fontSize: 13),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text(primaryLocation,
-                      style: AppTextStyles.caption.copyWith(fontSize: 11)),
+                  const SizedBox(width: AppSpacing.s8),
+                  Text(
+                    primaryLocation,
+                    style: AppTextStyles.caption.copyWith(fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
               const SizedBox(height: AppSpacing.s4),
@@ -265,7 +287,7 @@ void _showInventoryDetails(
   List<StockLevel> levels,
 ) {
   final locations = levels.where((level) => level.itemId == item.id).toList();
-  final total = totalStock(item.id, levels);
+  final total = currentStock(item, levels);
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -304,7 +326,12 @@ void _showInventoryDetails(
               ],
             ),
             const SizedBox(height: AppSpacing.s4),
-            Text(item.name, style: AppTextStyles.bodyStrong),
+            Text(
+              item.name,
+              style: AppTextStyles.bodyStrong,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
             const SizedBox(height: AppSpacing.s16),
             _InventoryDetailLine(
               label: 'Current stock',
@@ -324,21 +351,32 @@ void _showInventoryDetails(
             ),
             const SectionLabel('Rack locations'),
             const SizedBox(height: AppSpacing.s8),
-            for (final location in locations)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.s8),
-                child: Row(
-                  children: [
-                    Expanded(
-                        child: Text(location.locationId,
-                            style: AppTextStyles.body)),
-                    Text(
-                      '${formatQty(location.quantity)} ${item.unit}',
-                      style: AppTextStyles.bodyStrong,
-                    ),
-                  ],
-                ),
+            if (item.rackLocation?.isNotEmpty == true)
+              _InventoryDetailLine(
+                label: 'Rack location',
+                value: item.rackLocation!,
+              )
+            else if (locations.isEmpty)
+              const _InventoryDetailLine(
+                label: 'Rack location',
+                value: 'No rack assigned',
               ),
+            if (item.rackLocation?.isEmpty ?? true)
+              for (final location in locations)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.s8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                          child: Text(location.locationId,
+                              style: AppTextStyles.body)),
+                      Text(
+                        '${formatQty(location.quantity)} ${item.unit}',
+                        style: AppTextStyles.bodyStrong,
+                      ),
+                    ],
+                  ),
+                ),
             const SizedBox(height: AppSpacing.s8),
             SizedBox(
               width: double.infinity,

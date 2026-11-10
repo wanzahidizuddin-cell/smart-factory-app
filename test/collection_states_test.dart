@@ -26,7 +26,7 @@ void main() {
     expect(find.text('Loading deliveries...'), findsOneWidget);
     response.complete(const []);
     await tester.pumpAndSettle();
-    expect(find.text('No deliveries today'), findsOneWidget);
+    expect(find.text('No incoming HDD/SSD batches today'), findsOneWidget);
     expect(find.text('Refresh'), findsOneWidget);
   });
 
@@ -57,7 +57,7 @@ void main() {
     expect(find.text('Loading inventory...'), findsOneWidget);
     retryResponse.complete(const []);
     await tester.pumpAndSettle();
-    expect(find.text('No inventory items yet'), findsOneWidget);
+    expect(find.text('No storage drives yet'), findsOneWidget);
   });
 
   testWidgets('inventory successful empty response shows refresh state',
@@ -73,7 +73,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('No inventory items yet'), findsOneWidget);
+    expect(find.text('No storage drives yet'), findsOneWidget);
     expect(find.text('Refresh'), findsOneWidget);
   });
 }

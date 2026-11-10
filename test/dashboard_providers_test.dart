@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_factory_qc/data/repositories/dashboard_repository.dart';
+import 'package:smart_factory_qc/data/repositories/qc_repository.dart';
 import 'package:smart_factory_qc/domain/models/activity_entry.dart';
+import 'package:smart_factory_qc/domain/models/inspection_record.dart';
 import 'package:smart_factory_qc/features/home/home_screen.dart';
 import 'package:smart_factory_qc/features/shared/providers/app_state.dart';
 
@@ -62,6 +64,7 @@ void main() {
               activity: const [],
             ),
           ),
+          qcRepositoryProvider.overrideWithValue(_FakeQcRepository()),
         ],
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -73,6 +76,11 @@ void main() {
     expect(find.text('01'), findsOneWidget);
     expect(find.textContaining('Last synced '), findsOneWidget);
   });
+}
+
+class _FakeQcRepository implements QcRepository {
+  @override
+  Future<List<InspectionRecord>> fetchInspections() async => const [];
 }
 
 class _FakeDashboardRepository extends DashboardRepository {

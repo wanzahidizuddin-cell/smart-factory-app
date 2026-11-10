@@ -19,7 +19,7 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final stats = ref.watch(dashboardStatsProvider);
-    final activity = ref.watch(recentActivityProvider);
+    final inspections = ref.watch(inspectionsProvider);
     final localActivity = ref.watch(activityProvider);
     final sync = ref.watch(syncStatusProvider);
     final lastSync = ref.watch(lastSyncProvider);
@@ -59,7 +59,26 @@ class HomeScreen extends ConsumerWidget {
               ),
               const SizedBox(height: AppSpacing.s12),
             ],
-            Text('Good morning, Asha', style: AppTextStyles.title),
+            if (sync.errorMessage != null) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Sync issue: ${sync.errorMessage}',
+                      style: const TextStyle(color: AppColors.failed),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: sync.isSyncing
+                        ? null
+                        : () => ref.read(syncStatusProvider.notifier).sync(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.s8),
+            ],
+            Text('Good morning', style: AppTextStyles.title),
             const SizedBox(height: AppSpacing.s4),
             Text(
               'Sun, 18 Oct 2026 • Shift A • 06:00–14:00',
@@ -151,8 +170,24 @@ class HomeScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.s16),
             const SectionLabel('Recent activity'),
             const SizedBox(height: AppSpacing.s8),
-            activity.when(
-              data: (recentActivity) {
+            inspections.when(
+              data: (records) {
+                final recentActivity = records.map((record) {
+                  final recordedAt =
+                      DateTime.parse(record.recordedAt).toLocal();
+                  return ActivityEntry(
+                    title:
+                        '${record.serialNumber} ${record.result.label.toLowerCase()}',
+                    reference:
+                        '${record.machine} • ${record.inspector} • ${TimeOfDay.fromDateTime(recordedAt).format(context)}',
+                    status: record.result,
+                    minutesAgo: DateTime.now()
+                        .difference(recordedAt)
+                        .inMinutes
+                        .clamp(0, 1 << 31)
+                        .toInt(),
+                  );
+                }).toList(growable: false);
                 final localTitles =
                     localActivity.map((entry) => entry.title).toSet();
                 final entries = [
@@ -185,10 +220,10 @@ class HomeScreen extends ConsumerWidget {
               ),
               error: (error, stackTrace) => Card(
                 child: ListTile(
-                  title: const Text('Unable to load recent activity.'),
+                  title: const Text('Unable to load recent inspections.'),
                   trailing: IconButton(
                     tooltip: 'Retry',
-                    onPressed: () => ref.invalidate(recentActivityProvider),
+                    onPressed: () => ref.invalidate(inspectionsProvider),
                     icon: const Icon(Icons.refresh_rounded),
                   ),
                 ),
@@ -289,6 +324,8 @@ class _ActivityCard extends StatelessWidget {
                     Text(
                       entry.title,
                       style: AppTextStyles.bodyStrong.copyWith(fontSize: 13),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: AppSpacing.s4),
                     Text(

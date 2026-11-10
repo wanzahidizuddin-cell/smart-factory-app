@@ -5,6 +5,7 @@ import 'package:smart_factory_qc/core/theme/app_theme.dart';
 import 'package:smart_factory_qc/core/utils/format.dart';
 import 'package:smart_factory_qc/core/widgets/section_label.dart';
 import 'package:smart_factory_qc/core/widgets/status_badge.dart';
+import 'package:smart_factory_qc/domain/models/batch_status.dart';
 import 'package:smart_factory_qc/domain/models/delivery.dart';
 import 'package:smart_factory_qc/features/deliveries/delivery_detail_screen.dart';
 import 'package:smart_factory_qc/features/shared/providers/app_state.dart';
@@ -55,7 +56,7 @@ class DeliveriesScreen extends ConsumerWidget {
                   onChanged: ref.read(deliveryFilterProvider.notifier).setQuery,
                   style: AppTextStyles.body,
                   decoration: const InputDecoration(
-                    hintText: 'Search batch or supplier',
+                    hintText: 'Search storage batches, SKUs, or suppliers...',
                     suffixIcon:
                         Icon(Icons.search_rounded, color: AppColors.slate500),
                   ),
@@ -104,11 +105,13 @@ class DeliveriesScreen extends ConsumerWidget {
                   return CollectionEmptyState(
                     icon: Icons.inbox_outlined,
                     title: noFilters
-                        ? 'No deliveries today'
-                        : 'No matching deliveries',
+                        ? 'No incoming HDD/SSD batches today'
+                        : 'No matching storage batches',
                     description: noFilters
-                        ? 'New incoming batches will appear here when receiving logs a delivery.'
-                        : 'Try a different search or filter. Matching deliveries will appear here.',
+                        ? 'Incoming hard-drive and SSD batches will appear here when receiving logs a delivery.'
+                        : filter.needsReviewOnly
+                            ? 'No pending QC batches for HDDs/SSDs.'
+                            : 'No storage batches match your search or selected QC status.',
                     actionLabel: 'Refresh',
                     footer: 'Showing all records • Assembly plant 01',
                     onAction: () =>
@@ -192,6 +195,20 @@ class _DeliveryCard extends StatelessWidget {
             children: [
               Row(
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.s8),
+                    child: Icon(
+                      delivery.status == BatchStatus.quarantined
+                          ? Icons.thermostat
+                          : delivery.material.toLowerCase().contains('nvme')
+                              ? Icons.memory
+                              : Icons.storage,
+                      color: delivery.status == BatchStatus.quarantined
+                          ? AppColors.failed
+                          : AppColors.accent,
+                      size: 20,
+                    ),
+                  ),
                   Expanded(
                     child: Text(
                       delivery.batchNumber,
@@ -213,6 +230,8 @@ class _DeliveryCard extends StatelessWidget {
                 '${delivery.materialCode} • ${delivery.material}',
                 style:
                     AppTextStyles.caption.copyWith(color: AppColors.slate600),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: AppSpacing.s4),
               Row(

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_factory_qc/data/dummy_data.dart';
 import 'package:smart_factory_qc/domain/models/batch_status.dart';
+import 'package:smart_factory_qc/domain/models/inventory.dart';
 import 'package:smart_factory_qc/domain/stock_calculator.dart';
 import 'package:smart_factory_qc/features/shared/providers/app_state.dart';
 
@@ -62,6 +63,38 @@ void main() {
     expect(
       lowStock.every((item) => isLowStock(item, DummyData.stockLevels)),
       isTrue,
+    );
+  });
+
+  test('inventory uses Supabase quantity and rack location fields', () async {
+    const item = InventoryItem(
+      id: 'supabase-item',
+      sku: 'SSD-001',
+      name: 'Factory SSD',
+      unit: 'kg',
+      reorderLevel: 80,
+      targetLevel: 200,
+      currentQuantity: 75.5,
+      rackLocation: 'Rack C-12',
+    );
+    final container = ProviderContainer(
+      overrides: [
+        inventoryFetcherProvider.overrideWithValue(() async => [item]),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(inventoryProvider.future);
+
+    final items = container.read(filteredInventoryProvider).requireValue;
+    expect(items.single.currentQuantity, 75.5);
+    expect(items.single.rackLocation, 'Rack C-12');
+    expect(currentStock(items.single, DummyData.stockLevels), 75.5);
+    expect(isLowStock(items.single, DummyData.stockLevels), isTrue);
+
+    container.read(inventoryFilterProvider.notifier).setQuery('Rack C-12');
+    expect(
+      container.read(filteredInventoryProvider).requireValue.single.sku,
+      'SSD-001',
     );
   });
 }

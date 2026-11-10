@@ -3,8 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_factory_qc/app/app_shell.dart';
 import 'package:smart_factory_qc/core/theme/app_theme.dart';
+import 'package:smart_factory_qc/domain/models/app_role.dart';
+import 'package:smart_factory_qc/features/audit/screens/audit_log_screen.dart';
 import 'package:smart_factory_qc/features/auth/screens/login_page.dart';
 import 'package:smart_factory_qc/features/shared/providers/app_state.dart';
+import 'package:smart_factory_qc/features/telemetry/screens/telemetry_dashboard_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> main() async {
@@ -29,6 +32,10 @@ class SmartFactoryApp extends ConsumerWidget {
       home: const _AuthGate(),
       routes: {
         '/home': (context) => const _AuthenticatedAppShell(),
+        '/telemetry': (context) => const TelemetryDashboardScreen(),
+        '/audit-logs': (context) => const _AdminRouteGuard(
+              child: AuditLogScreen(),
+            ),
       },
     );
   }
@@ -39,6 +46,7 @@ class _AuthGate extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(syncServiceProvider);
     final authState = ref.watch(authStateProvider);
     return authState.when(
       loading: () => const Scaffold(
@@ -58,15 +66,66 @@ class _AuthGate extends ConsumerWidget {
           ),
         ),
       ),
-      data: (state) => state.session == null
-          ? LoginPage(
-              onSignedIn: () {
-                Navigator.of(context).pushReplacementNamed('/home');
-              },
-            )
-          : const _AuthenticatedAppShell(),
+      data: (state) {
+        if (state.session == null) {
+          return LoginPage(
+            onSignedIn: () {
+              Navigator.of(context).pushReplacementNamed('/home');
+            },
+          );
+        }
+        ref.read(syncServiceProvider).syncPending().catchError(
+          (Object error, StackTrace stackTrace) {
+            debugPrint('Could not resume queued actions: $error');
+          },
+        );
+        return const _AuthenticatedAppShell();
+      },
     );
   }
+}
+
+class _AdminRouteGuard extends ConsumerWidget {
+  const _AdminRouteGuard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final role = ref.watch(userRoleProvider);
+    return role.when(
+      data: (value) =>
+          value == AppRole.systemAdmin ? child : const _RedirectToHome(),
+      error: (_, __) => const _RedirectToHome(),
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      ),
+    );
+  }
+}
+
+class _RedirectToHome extends StatefulWidget {
+  const _RedirectToHome();
+
+  @override
+  State<_RedirectToHome> createState() => _RedirectToHomeState();
+}
+
+class _RedirectToHomeState extends State<_RedirectToHome> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (_) => false);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
 }
 
 class _AuthenticatedAppShell extends ConsumerWidget {
